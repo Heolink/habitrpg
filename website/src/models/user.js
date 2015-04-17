@@ -8,14 +8,19 @@ var mongoose = require("mongoose");
 var Schema = mongoose.Schema;
 var shared = require('../../../common');
 var _ = require('lodash');
-var TaskSchemas = require('./task');
+var Task = require('./task').model;
 var Challenge = require('./challenge').model;
 var moment = require('moment');
+var async = require('async');
+var reversePopulate = require('mongoose-reverse-populate');
 
 // User Schema
 // -----------
 
 var UserSchema = new Schema({
+
+  tasks: [{type:String, ref:"Task"}], //todo use backref instead via mongoose-reverse-populate?
+
   // ### UUID and API Token
   _id: {
     type: String,
@@ -388,16 +393,13 @@ var UserSchema = new Schema({
     optOut: {type:Boolean, 'default':false}
   },
 
-  habits:   {type:[TaskSchemas.HabitSchema]},
-  dailys:   {type:[TaskSchemas.DailySchema]},
-  todos:    {type:[TaskSchemas.TodoSchema]},
-  rewards:  {type:[TaskSchemas.RewardSchema]},
-
   extra: Schema.Types.Mixed
 
 }, {
   strict: true,
-  minimize: false // So empty objects are returned
+  minimize: false, // So empty objects are returned
+  toObject: { virtuals: true },
+  toJSON: { virtuals: true }
 });
 
 UserSchema.methods.deleteTask = function(tid) {
@@ -411,50 +413,40 @@ UserSchema.methods.toJSON = function() {
   // FIXME? Is this a reference to `doc.filters` or just disabled code? Remove?
   doc.filters = {};
   doc._tmp = this._tmp; // be sure to send down drop notifs
+  delete doc.tasks;
 
   return doc;
 };
 
-//UserSchema.virtual('tasks').get(function () {
-//  var tasks = this.habits.concat(this.dailys).concat(this.todos).concat(this.rewards);
-//  var tasks = _.object(_.pluck(tasks,'id'), tasks);
-//  return tasks;
-//});
-
 UserSchema.post('init', function(doc){
-  shared.wrap(doc);
+  shared.wrap(doc); //fixme remove
 })
 
 UserSchema.pre('save', function(next) {
 
   // Populate new users with default content
   if (this.isNew){
-    //TODO for some reason this doesn't work here: `_.merge(this, shared.content.userDefaults);`
     var self = this;
-    _.each(['habits', 'dailys', 'todos', 'rewards', 'tags'], function(taskType){
-      self[taskType] = _.map(shared.content.userDefaults[taskType], function(task){
-        var newTask = _.cloneDeep(task);
-
+    _.each(['habits', 'dailys', 'todos', 'rewards'], function(type){
+      _.each(shared.content.userDefaults[type], _.flow(_.cloneDeep, function(task){
         // Render task's text and notes in user's language
-        if(taskType === 'tags'){
-          // tasks automatically get id=helpers.uuid() from TaskSchema id.default, but tags are Schema.Types.Mixed - so we need to manually invoke here
-          newTask.id = shared.uuid();
-          newTask.name = newTask.name(self.preferences.language);
-        }else{
-          newTask.text = newTask.text(self.preferences.language);
-          newTask.notes = newTask.notes(self.preferences.language);
-
-          if(newTask.checklist){
-            newTask.checklist = _.map(newTask.checklist, function(checklistItem){
-              checklistItem.text = checklistItem.text(self.preferences.language);
-              return checklistItem;
-            });
-          }
-        }
-
-        return newTask;
-      });
+        task.text = task.text(self.preferences.language);
+        task.notes = task.notes(self.preferences.language);
+        _.each(task.checklist, function(checklistItem){
+          checklistItem.text = checklistItem.text(self.preferences.language);
+        })
+        task._owner = this._id;
+        task = new Task(task);
+        self.tasks.push(task);
+        task.save();
+      }));
     });
+    self.tags = _.map(shared.content.userDefaults.tags, _.flow(_.cloneDeep, function(tag){
+      // tasks automatically get id=helpers.uuid() from TaskSchema id.default, but tags are Schema.Types.Mixed - so we need to manually invoke here
+      tag.id = shared.uuid();
+      tag.name = tag.name(self.preferences.language);
+      return tag;
+    }));
   }
 
   //this.markModified('tasks');
@@ -507,6 +499,8 @@ UserSchema.pre('save', function(next) {
   if (_.isNaN(this._v) || !_.isNumber(this._v)) this._v = 0;
   this._v++;
 
+  delete this.tasks;
+
   next();
 });
 
@@ -535,12 +529,27 @@ UserSchema.methods.unlink = function(options, cb) {
       })
       break;
   }
-  self.markModified('habits');
-  self.markModified('dailys');
-  self.markModified('todos');
-  self.markModified('rewards');
   self.save(cb);
 }
+
+_.each(['habit', 'daily', 'todo', 'reward'], function(type){
+  UserSchema.virtual(type+'s').get(function(){
+    return _.reduce(this.tasks, function(m,v){
+      if (v.type==type) m[v._id]=v;return m;
+    }, {})
+  })
+})
+
+UserSchema.statics.withTasks = function (q, cb) {
+  q = _.isString(q) ? {_id:q} : q;
+  //async.waterfall([ function(cb2){mongoose.model('User').findById(_id, cb2)},
+  //function(user, cb2){reversePopulate(user, "tasks", true, Task, "owner._id", cb2)}
+  this.findOne(q)
+  .populate('tasks') //match: {archived:false}
+  .exec(cb);
+
+}
+
 
 module.exports.schema = UserSchema;
 module.exports.model = mongoose.model("User", UserSchema);

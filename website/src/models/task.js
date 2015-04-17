@@ -1,104 +1,81 @@
-// User.js
-// =======
-// Defines the user data model (schema) for use via the API.
-
-// Dependencies
-// ------------
 var mongoose = require("mongoose");
 var Schema = mongoose.Schema;
 var shared = require('../../../common');
 var _ = require('lodash');
 
-// Task Schema
-// -----------
+//TODO use mongoose discriminator to create diff schemas
+//TODO verify schema
+var TaskSchema = new Schema({
+  _id:{type: String,'default': shared.uuid},
 
-var TaskSchema = {
-  //_id:{type: String,'default': helpers.uuid},
-  id: {type: String,'default': shared.uuid},
+  _owner: String, //// TODO ref:Dynamic (see mongoose 4.x)
+    //{type: String}, // self, peer, challenge, template, group
+
   dateCreated: {type:Date, 'default':Date.now},
   text: String,
-  notes: {type: String, 'default': ''},
+  notes: String,
   tags: {type: Schema.Types.Mixed, 'default': {}}, //{ "4ddf03d9-54bd-41a3-b011-ca1f1d2e9371" : true },
   value: {type: Number, 'default': 0}, // redness
-  priority: {type: Number, 'default': '1'},
+  priority: {type: Number, 'default': 1},
   attribute: {type: String, 'default': "str", enum: ['str','con','int','per']},
-  challenge: {
-    id: {type: 'String', ref:'Challenge'},
-    broken: String, // CHALLENGE_DELETED, TASK_DELETED, UNSUBSCRIBED, CHALLENGE_CLOSED
-    winner: String // user.profile.name
-    // group: {type: 'Strign', ref: 'Group'} // if we restore this, rename `id` above to `challenge`
-  }
-};
+  sort: {type: Number},
+  type: {type:String, 'default': 'habit'},
 
-var HabitSchema = new Schema(
-  _.defaults({
-    type: {type:String, 'default': 'habit'},
-    history: Array, // [{date:Date, value:Number}], // this causes major performance problems
-    up: {type: Boolean, 'default': true},
-    down: {type: Boolean, 'default': true}
-  }, TaskSchema)
-  , { _id: false, minimize:false }
-);
+  //challenge: {
+  //  broken: String, // CHALLENGE_DELETED, TASK_DELETED, UNSUBSCRIBED, CHALLENGE_CLOSED
+  //  winner: String // user.profile.name
+  //  // group: {type: 'Strign', ref: 'Group'} // if we restore this, rename `id` above to `challenge`
+  //}
 
-var collapseChecklist = {type:Boolean, 'default':false};
-var checklist = [{
-  completed:{type:Boolean,'default':false},
-  text: String,
-  _id:false,
-  id: {type:String,'default':shared.uuid}
-}];
+  // Habits
+  history: Array, // habits+dailies. Note [{date:Date, value:Number}] causes major performance problems
+  up: {type: Boolean, 'default': true},
+  down: {type: Boolean, 'default': true},
 
-var DailySchema = new Schema(
-  _.defaults({
-    type: {type:String, 'default': 'daily'},
+  // Dailies
+  repeat: {
+    m:  {type: Boolean, 'default': true},
+    t:  {type: Boolean, 'default': true},
+    w:  {type: Boolean, 'default': true},
+    th: {type: Boolean, 'default': true},
+    f:  {type: Boolean, 'default': true},
+    s:  {type: Boolean, 'default': true},
+    su: {type: Boolean, 'default': true}
+  },
+
+  checklist:[{ // dailies+todos
+    completed: {type: Boolean, 'default': false},
+    text: String,
+    _id: {type: String, 'default': shared.uuid}, // @migration from id
+  }],
+
+  // To-Dos
+  due: {}, //@migration from date(string) to Date // FIXME we're getting parse errors, people have stored as "today" and "3/13". Need to run a migration & put this back to type: Date
+
+  overrides: {type:Schema.Types.Mixed, 'default':{}}, /* { TODO Dictionary
+    text: String,
+    notes: String,
+    tags: {type: Schema.Types.Mixed, 'default': {}}, //{ "4ddf03d9-54bd-41a3-b011-ca1f1d2e9371" : true },
+    value: {type: Number, 'default': 0}, // redness
+    sort: Number,
+
     history: Array,
-    completed: {type: Boolean, 'default': false},
-    repeat: {
-      m:  {type: Boolean, 'default': true},
-      t:  {type: Boolean, 'default': true},
-      w:  {type: Boolean, 'default': true},
-      th: {type: Boolean, 'default': true},
-      f:  {type: Boolean, 'default': true},
-      s:  {type: Boolean, 'default': true},
-      su: {type: Boolean, 'default': true}
-    },
-    collapseChecklist:collapseChecklist,
-    checklist:checklist,
-    streak: {type: Number, 'default': 0}
-  }, TaskSchema)
-  , { _id: false, minimize:false }
-)
 
-var TodoSchema = new Schema(
-  _.defaults({
-    type: {type:String, 'default': 'todo'},
-    completed: {type: Boolean, 'default': false},
+    completed: {type: Boolean, 'default': false}, //dailies+todos
+    collapseChecklist: {type:Boolean, 'default':false}, // dailies+todos
+    streak: {type: Number, 'default': 0},
     dateCompleted: Date,
-    date: String, // due date for todos // FIXME we're getting parse errors, people have stored as "today" and "3/13". Need to run a migration & put this back to type: Date
-    collapseChecklist:collapseChecklist,
-    checklist:checklist
-  }, TaskSchema)
-  , { _id: false, minimize:false }
-);
+    archived: {type:Boolean, 'default':false},
+    approval: Number,
+  }*/
 
-var RewardSchema = new Schema(
-  _.defaults({
-    type: {type:String, 'default': 'reward'}
-  }, TaskSchema)
-  , { _id: false, minimize:false }
-);
+});
 
-/**
- * Workaround for bug when _id & id were out of sync, we can remove this after challenges has been running for a while
- */
-//_.each([HabitSchema, DailySchema, TodoSchema, RewardSchema], function(schema){
-//  schema.post('init', function(doc){
-//    if (!doc.id && doc._id) doc.id = doc._id;
-//  })
-//})
+TaskSchema.pre('save', function(next){
+  //TODO prune history
+  next();
+})
 
-module.exports.TaskSchema = TaskSchema;
-module.exports.HabitSchema = HabitSchema;
-module.exports.DailySchema = DailySchema;
-module.exports.TodoSchema = TodoSchema;
-module.exports.RewardSchema = RewardSchema;
+
+module.exports.schema = TaskSchema;
+module.exports.model = mongoose.model("Task", TaskSchema);

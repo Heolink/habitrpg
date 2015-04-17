@@ -1555,9 +1555,12 @@ api.wrap = (user, main=true) ->
             if completed || (scheduleMisses > 0)
               _.each task.checklist, ((i)->i.completed=false;true) # this should not happen for grey tasks unless they are completed
           when 'todo'
-          #get updated value
+            # get updated value
             absVal = if (completed) then Math.abs(task.value) else task.value
             todoTally += absVal
+            # archive old ones #FIXME untested code
+            if t.completed && !t.challenge?.id && moment(t.dateCompleted).isBefore(moment().subtract({days:3}))
+              t.archived = true
 
       user.habits.forEach (task) -> # slowly reset 'onlies' value to 0
         if task.up is false or task.down is false
@@ -1680,7 +1683,3 @@ api.wrap = (user, main=true) ->
       , {}
       computed.maxMP = computed.int*2 + 30
       computed
-  Object.defineProperty user, 'tasks',
-    get: ->
-      tasks = user.habits.concat(user.dailys).concat(user.todos).concat(user.rewards)
-      _.object(_.pluck(tasks, "id"), tasks)
